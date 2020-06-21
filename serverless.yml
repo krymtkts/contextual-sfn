@@ -1,0 +1,83 @@
+service: contextual-sfn
+
+#app: your-app-name
+#org: your-org-name
+
+frameworkVersion: ">=1.28.0 <2.0.0"
+
+plugins:
+  - serverless-step-functions
+
+provider:
+  name: aws
+  runtime: go1.x
+  stage: dev
+  region: ap-northeast-1
+  memorySize: 128
+  timeout: 900
+  iamManagedPolicies:
+    - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+package:
+  exclude:
+    - ./**
+  include:
+    - ./bin/**
+
+functions:
+  task:
+    handler: bin/task
+  map:
+    handler: bin/map
+  reduce:
+    handler: bin/reduce
+
+stepFunctions:
+  stateMachines:
+    contextualSfn:
+      definition:
+        Comment: "Example for passing parameters across states"
+        StartAt: Entrypoint
+        States:
+          Entrypoint:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [task, Arn]
+            ResultPath: $.data
+            # OutputPath: $
+            Next: Map
+          Map:
+            Type: Map
+            MaxConcurrency: 10
+            Parameters:
+              k.$: $$.Map.Item.Value
+              t.$: $.data.t
+              a.$: $.data.sa
+            ItemsPath: $.data.ia
+            ResultPath: $.null
+            OutputPath: $.data
+            Iterator:
+              StartAt: MapTask
+              States:
+                MapTask:
+                  Type: Task
+                  Resource: !GetAtt [map, Arn]
+                  End: true
+            Next: Reduce
+          Reduce:
+            Type: Map
+            Parameters:
+              k.$: $$.Map.Item.Value
+              t.$: $.t
+            ItemsPath: $.sa
+            ResultPath: $.null
+            OutputPath: $.t
+            Iterator:
+              StartAt: ReduceTask
+              States:
+                ReduceTask:
+                  Type: Task
+                  Resource: !GetAtt [reduce, Arn]
+                  End: true
+            End: true
+  validate: true # enable pre-deployment definition validation (disabled by default)
